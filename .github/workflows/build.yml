@@ -1,0 +1,120 @@
+name: MongoDB 8.0.32 ARM64 VA39
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mongodb-va39-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check native architecture and resource budget
+        run: |
+          set -euo pipefail
+          mkdir -p out .ci-work
+          { uname -a; free -m; df -h .; } | tee out/runner.txt
+          test "$(uname -m)" = aarch64
+          test "$(awk '/MemTotal/ {print $2}' /proc/meminfo)" -ge 12000000
+          test "$(df --output=avail -B1 . | tail -1)" -ge 12884901888
+          echo "BUILD_DEADLINE=$(( $(date +%s) + 300 * 60 ))" >> "$GITHUB_ENV"
+
+      - name: Restore only matching native build cache
+        id: cache
+        timeout-minutes: 15
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ci-work
+          key: mongo8-va39-native-v1-${{ hashFiles('Dockerfile.builder', 'scripts/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mongo8-va39-native-v1-${{ hashFiles('Dockerfile.builder', 'scripts/**') }}-
+
+      - name: Prepare pinned ARM64 build environment
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          docker build --platform linux/arm64 -f Dockerfile.builder -t mongo-va39-builder . 2>&1 | tee out/environment.log
+          test "$(docker image inspect --format '{{.Architecture}}' mongo-va39-builder)" = arm64
+          docker image inspect --format '{{.Id}}' mongo-va39-builder > out/builder-image-id.txt
+
+      - name: Compile only install-mongod within remaining budget
+        id: compile
+        run: bash scripts/run-build.sh
+
+      - name: Verify binary in the original runtime image
+        if: success()
+        timeout-minutes: 12
+        run: |
+          set -euo pipefail
+          base=$(sed -n 's/^ARG MONGO_BASE=//p' Dockerfile.builder)
+          docker run --rm --network none --entrypoint /bin/sh \
+            --mount "type=bind,src=$PWD/out,dst=/verify,readonly" "$base" -ec \
+            'ldd /verify/mongod; /verify/mongod --version' > out/runtime-check.txt 2>&1
+          python3 scripts/verify-artifact.py out
+          docker build --network none -f Dockerfile.runtime -t mongo-va39:8.0.32 . 2>&1 | tee out/runtime-image.log
+          docker image inspect --format '{{.Id}}' mongo-va39:8.0.32 > out/runtime-image-id.txt
+          tar -czf out/mongodb-8.0.32-arm64-va39.tar.gz -C out \
+            mongod SOURCE_COMMIT va39.patch community-build.patch patched-source-sha256.txt \
+            build-options.txt runtime-check.txt verification.json SHA256SUMS
+          cd out
+          sha256sum mongodb-8.0.32-arm64-va39.tar.gz > mongodb-8.0.32-arm64-va39.tar.gz.sha256
+
+      - name: Stop this runner's builder before caching
+        if: always()
+        run: |
+          set -euo pipefail
+          if docker container inspect mongo-va39-native >/dev/null 2>&1; then
+            docker stop -t 30 mongo-va39-native >/dev/null
+          fi
+          sudo chown -R "$(id -u):$(id -g)" .ci-work out
+
+      - name: Save cache after success or a controlled build failure
+        if: always() && steps.compile.outcome != 'skipped' && steps.cache.outcome == 'success'
+        timeout-minutes: 20
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ci-work
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      - name: Upload logs and verification evidence
+        if: always()
+        timeout-minutes: 8
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: build-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            out/*.log
+            out/*.txt
+            out/*.json
+            out/*.patch
+            out/SOURCE_COMMIT
+            out/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload verified server archive
+        if: success()
+        timeout-minutes: 8
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mongodb-8.0.32-arm64-va39
+          path: |
+            out/mongodb-8.0.32-arm64-va39.tar.gz
+            out/mongodb-8.0.32-arm64-va39.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

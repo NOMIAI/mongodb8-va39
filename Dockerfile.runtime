@@ -1,0 +1,5 @@
+ARG MONGO_BASE=6z3t2uwtxhu3hk.xuanyuan.run/library/mongo:8.0@sha256:4968f22d0c6c10ef29952f3e807f62872ba22b3312f25803564fbfc08255efc2
+FROM --platform=linux/arm64 ${MONGO_BASE} AS runtime
+COPY out/mongod /usr/bin/mongod
+COPY out/va39.patch out/community-build.patch out/SOURCE_COMMIT out/SHA256SUMS /usr/share/mongodb-va39/
+RUN mongod --version

@@ -1,0 +1,9 @@
+**
+!Dockerfile.builder
+!Dockerfile.runtime
+!out/
+!out/mongod
+!out/va39.patch
+!out/community-build.patch
+!out/SOURCE_COMMIT
+!out/SHA256SUMS

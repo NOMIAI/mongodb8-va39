@@ -1,0 +1,4 @@
+.ci-work/
+out/
+__pycache__/
+*.pyc
