@@ -39,8 +39,10 @@ jobs:
         with:
           path: .ci-work
           key: mongo8-va39-native-v1-${{ hashFiles('Dockerfile.builder', 'scripts/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          # Audited fallback: same source/toolchain/options; only add the linker runtime libxml2.
           restore-keys: |
             mongo8-va39-native-v1-${{ hashFiles('Dockerfile.builder', 'scripts/**') }}-
+            mongo8-va39-native-v1-ff4cf70f6e92d653ba444f3ac54d258792126f1b7335366f8be3e0a2128745d9-35446137625-1
 
       - name: Prepare pinned ARM64 build environment
         timeout-minutes: 20
