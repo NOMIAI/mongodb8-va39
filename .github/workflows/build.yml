@@ -44,6 +44,10 @@ jobs:
             mongo8-va39-native-v1-${{ hashFiles('Dockerfile.builder', 'scripts/**') }}-
             mongo8-va39-native-v1-ff4cf70f6e92d653ba444f3ac54d258792126f1b7335366f8be3e0a2128745d9-35446137625-1
 
+      # Cache upload uses the runner UID; Bazel requires its cache to belong to its container UID.
+      - name: Restore container ownership of cached build files
+        run: sudo chown -R 0:0 .ci-work
+
       - name: Prepare pinned ARM64 build environment
         timeout-minutes: 20
         run: |
